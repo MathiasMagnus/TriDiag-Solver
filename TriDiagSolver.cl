@@ -537,3 +537,75 @@ kernel void spike_GPU_global_solving_x1(global elem* x,
 		ix += b_dim;
 	}
 }
+
+/// a thread-block level SPIKE solver 
+kernel void spike_GPU_local_solving_x1(global elem* x,
+                                       global const elem* w,
+                                       global const elem* v,
+                                       global const elem* x_mirror,
+                                       local elem* shared,
+                                       const int stride)
+{
+	int tx = threadIdx.x;
+	int b_dim = blockDim.x;
+	int bx = blockIdx.x;
+	
+	local elem* sh_w = shared;				
+	local elem* sh_v = sh_w + 2 * b_dim;				
+	local elem* sh_x = sh_v + 2 * b_dim; //sh_x is 2*b_dim + 2
+	
+	//a ~~ w
+	//b ~~ I
+	//c ~~ v
+	//d ~~ x
+	
+	int base = bx * stride * b_dim;
+	
+	// load halo to scratchpad
+	sh_w[tx] = w[base + tx];
+	sh_w[tx + b_dim] = w[base + tx + (stride - 1) * b_dim];
+	sh_v[tx] = v[base + tx];
+	sh_v[tx + b_dim] = v[base + tx + (stride - 1) * b_dim];
+	
+	// swap the order of x
+	// why
+	sh_x[tx + 1] = x[base + tx + (stride - 1) * b_dim];
+	sh_x[tx + b_dim + 1] = x[base + tx];
+	
+	barrer(CLK_LOCAL_MEM_FENCE);
+	
+	if (tx < 1)
+	{
+		int g_dim = gridDim.x;
+		sh_x[0] = bx > 0? x_mirror[bx - 1 + g_dim] : clReal(0);
+		sh_x[2 * b_dim + 1] = bx < g_dim - 1 ? x_mirror[bx + 1] : clReal(0);
+		
+		sh_x[b_dim + 1] = x_mirror[bx];
+		sh_x[b_dim] = x_mirror[bx + g_dim];		
+	}
+	barrer(CLK_LOCAL_MEM_FENCE);
+	
+	int scaler = b_dim;
+	while (scaler >= 2)
+	{
+		if (tx < b_dim / scaler)
+		{
+			int index = scaler*tx+scaler/2-1;
+			int up_index = scaler*tx;
+			int down_index = scaler*tx + scaler+1;
+	
+			sh_x[index + 1] = clFma(sh_w[index + b_dim], -sh_x[up_index], sh_x[index + 1]);
+            sh_x[index + 1] = clFma(sh_v[index + b_dim], -sh_x[down_index + b_dim], sh_x[index + 1]);
+            
+            sh_x[index + b_dim + 2] = clFma(sh_w[index + 1], -sh_x[up_index], sh_x[index + b_dim + 2]);
+            sh_x[index + b_dim + 2] = clFma(sh_v[index + 1], -sh_x[down_index + b_dim], sh_x[index + b_dim + 2]);
+		}
+
+		scaler /= 2;
+		barrer(CLK_LOCAL_MEM_FENCE);
+	}
+	
+	// write out
+	x[base + tx] = sh_x[tx + b_dim + 1];
+	x[base + tx + (stride - 1) * b_dim] = sh_x[tx + 1];
+}
