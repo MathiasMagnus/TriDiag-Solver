@@ -609,3 +609,44 @@ kernel void spike_GPU_local_solving_x1(global elem* x,
 	x[base + tx] = sh_x[tx + b_dim + 1];
 	x[base + tx + (stride - 1) * b_dim] = sh_x[tx + 1];
 }
+
+// backward substitution for SPIKE solver
+kernel void spike_GPU_back_sub_x1(global elem* x,
+                                  global const elem* w,
+                                  global const elem* v,
+                                  global const elem* x_mirror,
+                                  const int stride)
+{
+	int tx = threadIdx.x;
+	int b_dim = blockDim.x;
+	int bx = blockIdx.x;
+
+	int base = bx * stride * b_dim;
+	elem x_up, x_down;
+	
+	if (tx > 0 && tx < b_dim - 1)
+	{
+		x_up   = x[base + tx - 1 + (stride - 1) * b_dim];
+		x_down = x[base + tx + 1];
+	}
+	else
+	{
+		int g_dim = gridDim.x;
+		if (tx == 0)
+		{
+			x_up   = bx > 0 ? x_mirror[bx - 1 + g_dim] : clReal(0);
+			x_down = x[base + tx + 1];
+		}
+		else
+		{
+			x_up   = x[base + tx - 1 + (stride - 1) * b_dim];
+			x_down = bx < g_dim - 1 ? x_mirror[bx + 1] : clReal(0);
+		}
+	}
+	
+	for(int k = 1 ; k < stride - 1 ; k++)
+	{        
+        x[base + tx + k * b_dim] = clFma( w[base + tx + k * b_dim], -x_up,   x[base + tx + k * b_dim]);
+        x[base + tx + k * b_dim] = clFma( v[base + tx + k * b_dim], -x_down, x[base + tx + k * b_dim]);
+	}
+}
