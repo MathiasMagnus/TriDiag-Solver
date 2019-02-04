@@ -312,3 +312,107 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 		}		
 	}	
 }
+
+// SPIKE solver within a thread block for 1x rhs
+kernel void spike_local_reduction_x1(global elem* x,
+                                     global elem* w,
+                                     global elem* v,
+                                     global elem* x_mirror,
+                                     global elem* w_mirror,
+                                     global elem* v_mirror,
+									 local elem* shared,
+                                     const int stride) // stride per thread
+{
+	int tx threadIdx.x;
+	int b_dim = blockDim.x;
+	int bx = blockIdx.x;
+        
+	local elem* sh_w = shared;				
+	local elem* sh_v = sh_w + 2 * b_dim;				
+	local elem* sh_x = sh_v + 2 * b_dim;			
+	
+	//a ~~ w
+	//b ~~ I
+	//c ~~ v
+	//d ~~ x
+	
+	int base = bx * stride * b_dim;
+	
+	// load halo to scratchpad
+	sh_w[tx] = w[base + tx];
+	sh_w[tx + b_dim] = w[base + tx + (stride - 1) * b_dim];
+	sh_v[tx] = v[base + tx];
+	sh_v[tx + b_dim] = v[base + tx + (stride - 1) * b_dim];
+	sh_x[tx] = x[base + tx];
+	sh_x[tx + b_dim] = x[base + tx + (stride - 1) * b_dim];
+	
+	barrer(CLK_LOCAL_MEM_FENCE);
+	
+	int scaler = 2;
+	
+	while (scaler <= b_dim)
+	{
+		if (tx < b_dim / scaler)
+		{
+			int index;
+			int up_index;
+			int down_index;
+			index = scaler * tx + scaler / 2 - 1;
+			up_index= scaler * tx;
+			down_index = scaler * tx + scaler - 1;
+			elem det = clReal(1);
+			det = clFma(-sh_v[index + b_dim], sh_w[index + 1], det);
+			det = clDiv(clReal(1), det);
+			
+			elem d1,d2;
+			d1 = sh_x[index + b_dim];
+			d2 = sh_x[index + 1];
+			
+            sh_x[index + b_dim] = clMul(clFma(sh_v[index + b_dim], -d2, d1), det);
+            sh_x[index + 1]     = clMul(clFma(sh_w[index + 1], -d1, d2), det);			
+            sh_w[index + 1]     = clMul(sh_w[index + b_dim], clMul(sh_w[index + 1], -det));	            
+			sh_w[index + b_dim] = clMul(sh_w[index + b_dim], det);
+									
+			sh_v[index + b_dim] = clMul(sh_v[index + b_dim], clMul(sh_v[index + 1], -det));            
+			sh_v[index + 1]     = clMul(sh_v[index + 1], det);
+			
+			//boundary
+            sh_x[up_index] 		     = clFma(sh_x[index + 1], -sh_v[up_index], sh_x[up_index]);
+			sh_x[down_index + b_dim] = clFma(sh_x[index + b_dim], -sh_w[down_index + b_dim], sh_x[down_index + b_dim]);
+            
+            sh_w[up_index] = clFma(sh_w[index + 1], -sh_v[up_index], sh_w[up_index]);
+			sh_v[up_index] = clMul(-sh_v[index + 1], sh_v[up_index]);
+
+            sh_v[down_index + b_dim] = clFma(sh_v[index + b_dim], sh_w[down_index + b_dim], sh_v[down_index + b_dim]);
+            sh_w[down_index + b_dim] = clMul(sh_w[index + b_dim], sh_w[down_index + b_dim]);
+			
+		}
+		scaler *= 2;
+
+		barrer(CLK_LOCAL_MEM_FENCE);
+	}
+	
+	//write out
+	w[base + tx] = sh_w[tx];
+	w[base + tx + (stride - 1) * b_dim] = sh_w[tx + b_dim];
+	
+	v[base + tx] = sh_v[tx];
+	v[base + tx + (stride - 1) * b_dim] = sh_v[tx + b_dim];
+	
+	x[base + tx] = sh_x[tx];
+	x[base + tx + (stride - 1) * b_dim] = sh_x[tx + b_dim];
+	
+	//write mirror
+	if(tx < 1)
+	{
+		int g_dim = gridDim.x;
+		w_mirror[bx] = sh_w[0];
+		w_mirror[g_dim + bx] = sh_w[2 * b_dim - 1];
+		
+		v_mirror[bx] = sh_v[0];
+		v_mirror[g_dim + bx] = sh_v[2 * b_dim - 1];
+		
+		x_mirror[bx] = sh_x[0];
+		x_mirror[g_dim + bx] = sh_x[2 * b_dim - 1];
+	}
+}
