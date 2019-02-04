@@ -416,3 +416,124 @@ kernel void spike_local_reduction_x1(global elem* x,
 		x_mirror[g_dim + bx] = sh_x[2 * b_dim - 1];
 	}
 }
+
+///////////////////////////
+/// a global level SPIKE solver for oneGPU
+/// One block version
+///
+////////////////////
+kernel void spike_GPU_global_solving_x1(global elem* x,
+                                        global elem* w,
+                                        global elem* v,
+                                        local elem* shared,
+                                        const int len)
+{
+	int ix = threadIdx.x;
+	int b_dim = blockDim.x;
+	
+	local elem* sh_w = shared;
+	local elem* sh_v = sh_w + 2 * len;
+	local elem* sh_x = sh_v + 2 * len;
+
+	
+	//a ~~ w
+	//b ~~ I
+	//c ~~ v
+	//d ~~ x
+	
+	// read data
+	while (ix < len)
+	{
+		sh_w[ix] = w[ix];
+		sh_w[ix + len] = w[ix + len];
+		
+		sh_v[ix] = v[ix];
+		sh_v[ix + len] = v[ix + len];
+		
+		sh_x[ix] = x[ix];
+		sh_x[ix + len] = x[ix + len];
+		
+		ix += b_dim;
+	}
+	barrer(CLK_LOCAL_MEM_FENCE);
+	
+	int scaler = 2;
+	while (scaler <= len)
+	{
+		ix = threadIdx.x;
+		while (ix < len / scaler)
+		{
+			int index = scaler * ix + scaler / 2 - 1;;
+			int up_index = scaler * ix;
+			int down_index = scaler * ix + scaler - 1;
+
+			elem det = clInv(clFma(-sh_v[index + len], sh_w[index + 1], clReal(1)));
+            
+			elem d1,d2;
+			d1 = sh_x[index + len];
+			d2 = sh_x[index + 1];
+			
+            sh_x[index + len] = clMul(clFma(sh_v[index + len], -d2, d1), det);
+            sh_x[index + 1]   = clMul(clFma(sh_w[index + 1], -d1, d2), det);
+						
+            sh_w[index + 1]   = clMul(sh_w[index + len], clMul(sh_w[index + 1], -det));
+			sh_w[index + len] = clMul(sh_w[index + len], det);
+									
+            sh_v[index + len] = clMul(sh_v[index + len], clMul(sh_v[index + 1], -det));    
+			sh_v[index + 1]   = clMul(sh_v[index + 1], det);
+			
+			//boundary
+            sh_x[up_index] 		   = clFma(sh_x[index + 1], -sh_v[up_index], sh_x[up_index]); 
+            sh_x[down_index + len] = clFma(sh_x[index + len], -sh_w[down_index+len], sh_x[down_index + len]);
+						
+            sh_w[up_index] = clFma(sh_w[index + 1], -sh_v[up_index], sh_w[up_index]);
+
+            sh_v[up_index]         = clMul(-sh_v[index + 1], sh_v[up_index]);	
+            sh_v[down_index + len] = clFma(sh_v[index + len], -sh_w[down_index + len], sh_v[down_index + len]);
+            
+            sh_w[down_index + len] = clMul( -sh_w[index + len], sh_w[down_index + len]);
+			
+			ix += b_dim;
+			
+		}
+
+		scaler *= 2;
+		barrer(CLK_LOCAL_MEM_FENCE);
+	}
+	
+	// backward reduction
+	scaler = len / 2;
+	while (scaler >= 2)
+	{
+		ix = threadIdx.x;
+		while(ix < len/scaler)
+		{
+			int index = scaler * ix + scaler / 2 - 1;
+			int up_index = scaler * ix - 1;
+			int down_index = scaler * ix + scaler;
+
+			up_index = up_index < 0 ? 0 : up_index;
+			down_index = down_index < len ? down_index : len - 1;
+			
+            sh_x[index + len] = clFma(-sh_w[index + len], sh_x[up_index + len], sh_x[index + len]);
+            sh_x[index + len] = clFma(-sh_v[index + len], sh_x[down_index], sh_x[index + len]);
+            
+			sh_x[index + 1]   = clFma(-sh_w[index + 1], sh_x[up_index + len], sh_x[index + 1]);
+            sh_x[index + 1]   = clFma(-sh_v[index + 1], sh_x[down_index], sh_x[index + 1]);
+            
+			ix += b_dim;
+		}
+
+		scaler /= 2;
+		barrer(CLK_LOCAL_MEM_FENCE);
+	}
+	
+	// write out
+	ix = threadIdx.x;
+	while (ix < len)
+	{
+		x[ix] = sh_x[ix];
+		x[ix + len] = sh_x[ix + len];
+		ix += b_dim;
+	}
+}
