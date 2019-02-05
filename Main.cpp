@@ -14,6 +14,10 @@
 #include <cstddef>      // std::size_t
 #include <iostream>     // std::cout, std::cerr
 #include <stdexcept>    // std::runtime_error
+#include <random>       // std::default_random_engine, 
+
+using real = float;
+using solver_internal = float;
 
 int main(int argc, char** argv)
 {
@@ -73,55 +77,21 @@ int main(int argc, char** argv)
 
         cl::CommandQueue command_queue{ context, device, CL_QUEUE_PROFILING_ENABLE };
 
-        std::ifstream source_file("./Peak.cl");
-        if (!source_file.is_open()) throw std::runtime_error("Cannot open ./Peak.cl");
+        tridiag_solver<real, solver_internal> solver{ command_queue };
 
-        std::string source_string{ std::istreambuf_iterator<char>{source_file}, std::istreambuf_iterator<char>{} };
+        auto prng = [engine = std::default_random_engine{},
+                     dist = std::uniform_real_distribution<real>{ -1, 1 }]() mutable { return dist(engine); };
+        std::vector<real> d, du, dl;
+        std::generate_n(std::back_inserter(d),  length_arg.getValue(),     prng);
+        std::generate_n(std::back_inserter(du), length_arg.getValue() - 1, prng);
+        std::generate_n(std::back_inserter(dl), length_arg.getValue() - 1, prng);
 
-        cl::Program program{ context, source_string };
+        cl::Buffer  d_buf(context, d.begin(),  d.end(),  false), // false = read_only
+                   du_buf(context, du.begin(), du.end(), false), // false = read_only
+                   dl_buf(context, dl.begin(), dl.end(), false), // false = read_only
+                    b_buf(context, CL_MEM_READ_WRITE, length_arg.getValue() * sizeof(real));
 
-        std::stringstream build_opts;
-        build_opts <<
-            "-cl-mad-enable " <<
-            "-cl-no-signed-zeros " <<
-            "-cl-finite-math-only " <<
-            "-cl-single-precision-constant ";
-
-        if (!quiet_arg.getValue()) { std::cout << "Building program..."; std::cout.flush(); }
-        program.build({ device }, build_opts.str().c_str());
-        if (!quiet_arg.getValue()) { std::cout << " done." << std::endl; }
-
-        interaction = cl::Kernel(program, "interaction");
-        forward_euler = cl::Kernel(program, "forward_euler");
-
-        if (!quiet_arg.getValue())
-            std::cout << "Interaction kernel preferred WGS: " << interaction.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) << std::endl;
-        if (!quiet_arg.getValue())
-            std::cout << "Forward Euler kernel preferred WGS: " << forward_euler.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) << std::endl;
-
-        if (!quiet_arg.getValue()) { std::cout << "Reading input file..."; std::cout.flush(); }
-        particles = read_particle_file(input_arg.getValue());
-        if (!quiet_arg.getValue()) { std::cout << " done." << std::endl; }
-
-        buffer = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, particles.size() * sizeof(particle), particles.data());
-
-        interaction.setArg(0, buffer);
-        forward_euler.setArg(0, buffer);
-        forward_euler.setArg(1, 0.001f);
-
-        interaction_gws = cl::NDRange(particles.size());
-        interaction_lws = cl::NullRange;
-        euler_gws = cl::NDRange(particles.size());
-        euler_lws = cl::NullRange;
-
-        // Run warm-up kernels
-        command_queue.enqueueNDRangeKernel(interaction, cl::NullRange, interaction_gws, interaction_lws, nullptr, &interaction_event);
-        command_queue.enqueueNDRangeKernel(forward_euler, cl::NullRange, euler_gws, euler_lws);
-
-        command_queue.finish();
-
-        // Reset data
-        command_queue.enqueueWriteBuffer(buffer, CL_TRUE, 0, particles.size() * sizeof(particle), particles.data());
+        solver.gtsv_spike_partial_diag_pivot(dl_buf, d_buf, du_buf, b_buf, length_arg.getValue());
     }
     catch (TCLAP::ArgException& e)
     {
@@ -129,17 +99,25 @@ int main(int argc, char** argv)
         std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
         std::exit(EXIT_FAILURE);
     }
-    catch (cl::Error error)
+    catch (cl::BuildError e)
     {
-        std::cerr << error.what() << "(" << error.err() << ")" << std::endl;
-
-        if (std::string(error.what()) == "clBuildProgram")
+        std::cerr << e.what() << "(" << e.err() << ")" << std::endl;
+        for (auto& log : e.getBuildLog())
         {
-            if (program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(device) == CL_BUILD_ERROR)
-                std::cerr << std::endl << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << std::endl;
+            std::cerr << "Log for " << log.first.getInfo<CL_DEVICE_NAME>() << std::endl;
+            std::cerr << log.second << std::endl;
         }
-
-        exit(error.err());
+        std::exit(e.err());
+    }
+    catch (cl::Error e)
+    {
+        std::cerr << e.what() << "(" << e.err() << ")" << std::endl;
+        std::exit(e.err());
+    }
+    catch (std::exception e)
+    {
+        std::cerr << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
     }
 
     return 0;

@@ -21,7 +21,7 @@ public:
 
     tridiag_solver(cl::CommandQueue queue);
         
-    cl::Event gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl::Buffer d, cl::Buffer du, cl::Buffer b, cl::size_type m, cl::size_type k, std::vector<cl::Event> wait);
+    cl::Event gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl::Buffer d, cl::Buffer du, cl::Buffer b, cl::size_type m, std::vector<cl::Event> wait = {});
 
 private:
 
@@ -92,7 +92,7 @@ tridiag_solver<T, TT>::tridiag_solver(cl::CommandQueue queue)
 }
 
 template <typename T, typename TT>
-cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl::Buffer d, cl::Buffer du, cl::Buffer b, cl::size_type m, cl::size_type k, std::vector<cl::Event> wait)
+cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl::Buffer d, cl::Buffer du, cl::Buffer b, cl::size_type m, std::vector<cl::Event> wait)
 {
     cl::size_type tile = 128;
     cl::size_type tile_marshal = 16;
@@ -141,7 +141,8 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                       cl::Buffer,
                       cl::Buffer,
                       cl::Buffer,
-                      cl_int, cl_int> tiled_diag_pivot_x1{ tiled_diag_pivot_x1_kernel };
+                      cl_int,
+                      cl_int> tiled_diag_pivot_x1{ tiled_diag_pivot_x1_kernel };
 
     cl::KernelFunctor<cl::Buffer,
                       cl::Buffer,
@@ -183,7 +184,7 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                   cl::NDRange{ b_dim, s * tile_marshal },      // g_data
                                   cl::NDRange{ tile_marshal, tile_marshal } }, // b_data
                     pivot_enq_args{ queue_,
-                                    fwd_enq_args,
+                                    forward_events,
                                     cl::NDRange{ s * b_dim },
                                     cl::NDRange{ b_dim } },
                     spike_local_reduction_enq_args{ queue_,
@@ -207,10 +208,10 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                            cl::NDRange{ b_dim, s * tile_marshal },      // g_data
                                            cl::NDRange{ tile_marshal, tile_marshal } }; // b_data
     // data layout transformation
-    forward_events = { foward_marshaling_bxb(fwd_enq_args, dl_buffer, dl, cl::Local(marshaling_share_size), stride, b_dim, m, 0),
-                       foward_marshaling_bxb(fwd_enq_args, d_buffer,  d,  cl::Local(marshaling_share_size), stride, b_dim, m, 1),
-                       foward_marshaling_bxb(fwd_enq_args, du_buffer, du, cl::Local(marshaling_share_size), stride, b_dim, m, 0),
-                       foward_marshaling_bxb(fwd_enq_args, b_buffer,  b,  cl::Local(marshaling_share_size), stride, b_dim, m, 0) };
+    forward_events = { foward_marshaling_bxb(fwd_enq_args, dl_buffer, dl, cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 0),
+                       foward_marshaling_bxb(fwd_enq_args, d_buffer,  d,  cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 1),
+                       foward_marshaling_bxb(fwd_enq_args, du_buffer, du, cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 0),
+                       foward_marshaling_bxb(fwd_enq_args, b_buffer,  b,  cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 0) };
 
     // partitioned solver
     pivot_event = { tiled_diag_pivot_x1(pivot_enq_args,
@@ -222,8 +223,8 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                         dl_buffer,
                                         d_buffer,
                                         du_buffer,
-                                        stride,
-                                        tile) };
+                                        (cl_int)stride,
+                                        (cl_int)tile) };
 
     // SPIKE solver
     local_reduction_event = { spike_local_reduction_x1(spike_local_reduction_enq_args,
@@ -234,14 +235,14 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                                        w_level_2,
                                                        v_level_2,
                                                        cl::Local(local_reduction_share_size),
-                                                       stride) };
+                                                       (cl_int)stride) };
 
     global_solving_event = { spike_global_solving_x1(spike_global_solving_enq_args,
                                                      x_level_2,
                                                      w_level_2,
                                                      v_level_2,
                                                      cl::Local(global_share_size),
-                                                     s) };
+                                                     (cl_int)s) };
 
     local_solving_event = { spike_local_solving_x1(spike_local_reduction_enq_args,
                                                    b_buffer,
@@ -249,22 +250,22 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                                    v_buffer,
                                                    x_level_2,
                                                    cl::Local(local_solving_share_size),
-                                                   stride) };
+                                                   (cl_int)stride) };
 
     back_sub_event = { spike_back_sub_x1(spike_back_sub_enq_args,
                                          b_buffer,
                                          w_buffer,
                                          v_buffer,
                                          x_level_2,
-                                         stride) };
+                                         (cl_int)stride) };
 
     back_marshal_event = { back_marshaling_bxb(back_marshal_enq_args,
                                                b,
                                                b_buffer,
                                                cl::Local(marshaling_share_size),
-                                               stride,
-                                               b_dim,
-                                               m) };
+                                               (cl_int)stride,
+                                               (cl_int)b_dim,
+                                               (cl_int)m) };
 
     if (last_m != m) // cache grid for subsequent calls
     {
