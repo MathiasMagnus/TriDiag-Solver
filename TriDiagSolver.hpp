@@ -12,6 +12,7 @@
 #include <sstream>      // std::stringstream
 #include <vector>       // std::vector
 #include <algorithm>    // std::max
+#include <complex>
 
 
 template <typename T, typename TT>
@@ -51,6 +52,13 @@ private:
                            back_marshal_event;
 
     void findBestGrid(cl::size_type m, cl::size_type tile_marshal);
+
+    template <typename R> std::string host_type_to_cl_name();
+
+    template <> std::string host_type_to_cl_name<float>() { return "float"; };
+    template <> std::string host_type_to_cl_name<double>() { return "double"; };
+    template <> std::string host_type_to_cl_name<std::complex<float>>() { return "float2"; };
+    template <> std::string host_type_to_cl_name<std::complex<double>>() { return "double2"; };
 };
 
 
@@ -78,7 +86,10 @@ tridiag_solver<T, TT>::tridiag_solver(cl::CommandQueue queue)
         "-cl-mad-enable " <<
         "-cl-no-signed-zeros " <<
         "-cl-finite-math-only " <<
-        "-cl-single-precision-constant ";
+        "-cl-single-precision-constant " <<
+        "-Delem=" << host_type_to_cl_name<T>() << " " <<
+        "-Dreal=" << host_type_to_cl_name<TT>() << " " <<
+        "-I./";
 
     program.build({ queue.getInfo<CL_QUEUE_DEVICE>() }, build_opts.str().c_str());
 

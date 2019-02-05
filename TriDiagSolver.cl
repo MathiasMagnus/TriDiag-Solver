@@ -1,3 +1,5 @@
+#include <TriDiagSolverOps.cl>
+
 // Data layout transformation for inputs
 kernel void foward_marshaling_bxb(global elem* x,
                                   global const elem* y,
@@ -7,31 +9,24 @@ kernel void foward_marshaling_bxb(global elem* x,
                                   int m,
                                   elem pad)
 {	
-	int b_dim;
+	int b_dim = get_local_size(0); 	//16
 
-	int global_in;
-	int global_out;
-	int shared_in;
-	int shared_out;
-		
-	b_dim = blockDim.x; 	//16
-
-	global_in = blockIdx.y*l_stride*h_stride + (blockIdx.x*b_dim+threadIdx.y)*h_stride+threadIdx.x;
-	global_out = blockIdx.y*l_stride*h_stride + threadIdx.y*l_stride + blockIdx.x*b_dim+threadIdx.x;
-	shared_in = threadIdx.y*(b_dim+1)+threadIdx.x;
-	shared_out = threadIdx.x*(b_dim+1)+threadIdx.y;
+	int global_in = get_group_id(1)*l_stride*h_stride + (get_group_id(0)*b_dim+get_local_id(1))*h_stride+get_local_id(0);
+	int global_out = get_group_id(1)*l_stride*h_stride + get_local_id(1)*l_stride + get_group_id(0)*b_dim+get_local_id(0);
+	int shared_in = get_local_id(1)*(b_dim+1)+get_local_id(0);
+	int shared_out = get_local_id(0)*(b_dim+1)+get_local_id(1);
 
 	for (int k=0 ; k < h_stride ; k += b_dim)
 	{	
 		share[shared_in] = global_in >= m ? pad : y[global_in];
 		global_in += b_dim;
 		
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 		
 		x[global_out] = share[shared_out];
 		global_out += b_dim * l_stride;
 
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}		
 }
 
@@ -50,26 +45,26 @@ kernel void back_marshaling_bxb(global elem* x,
 	int shared_in;
 	int shared_out;
 	
-	b_dim = blockDim.x; 	//16
+	b_dim = get_local_size(0); 	//16
 
-	global_out = blockIdx.y*l_stride*h_stride +  (blockIdx.x*b_dim+threadIdx.y)*h_stride+threadIdx.x;
-	global_in = blockIdx.y*l_stride*h_stride + threadIdx.y*l_stride + blockIdx.x*b_dim+threadIdx.x;
-	shared_in = threadIdx.y*(b_dim+1)+threadIdx.x;
-	shared_out = threadIdx.x*(b_dim+1)+threadIdx.y;
+	global_out = get_group_id(1)*l_stride*h_stride +  (get_group_id(0)*b_dim+get_local_id(1))*h_stride+get_local_id(0);
+	global_in = get_group_id(1)*l_stride*h_stride + get_local_id(1)*l_stride + get_group_id(0)*b_dim+get_local_id(0);
+	shared_in = get_local_id(1)*(b_dim+1)+get_local_id(0);
+	shared_out = get_local_id(0)*(b_dim+1)+get_local_id(1);
 	
 	for (int k = 0 ; k < h_stride ; k += b_dim)
 	{
 		share[shared_in] = y[global_in];
 		global_in += b_dim*l_stride;
 		
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 		
         if (global_out < m) {
 		    x[global_out] = share[shared_out];
         }
 		global_out += b_dim;
 
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}		
 }
 
@@ -91,9 +86,9 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 	int ix;
 	int bx;
 	
-	bx = blockIdx.x;
-	b_dim = blockDim.x;
-	ix = bx*stride*b_dim+threadIdx.x;
+	bx = get_group_id(0);
+	b_dim = get_local_size(0);
+	ix = bx*stride*b_dim+get_local_id(0);
 
 	
 	int k = 0;
@@ -187,9 +182,9 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				b_buffer[ix] = b_k;
 				flag[ix] = false;
 				
-                x_k_1 = clFma(b_k, x_k_1, -cuMul(a_k_1, x_k)); //k+1
+                x_k_1 = clFma(b_k, x_k_1, -clMul(a_k_1, x_k)); //k+1
                 x_k_1 = clMul(x_k_1, delta);
-				w_k_1 = clMul(cuMul(-a_k_1, w_k), delta);	  //k+1
+				w_k_1 = clMul(clMul(-a_k_1, w_k), delta);	  //k+1
 				
 				x[ix + b_dim]        = x_k_1;	  //k+1
 				w[ix + b_dim]        = w_k_1;	  //k+1
@@ -288,7 +283,7 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				a_k_1 = a[ix];
 				b_k_1 = b_buffer[ix];
 				c_k_1 = c[ix];
-                delta = clFma(b_k, b_k_1, -cuMul(c_k,a_k_1));
+                delta = clFma(b_k, b_k_1, -clMul(c_k,a_k_1));
 				delta = clDiv(clReal(1), delta);
                 
                 elem prod = clMul(c_k_1, clMul(b_k, delta));
@@ -323,9 +318,9 @@ kernel void spike_local_reduction_x1(global elem* x,
 									 local elem* shared,
                                      const int stride) // stride per thread
 {
-	int tx threadIdx.x;
-	int b_dim = blockDim.x;
-	int bx = blockIdx.x;
+	int tx = get_local_id(0);
+	int b_dim = get_local_size(0);
+	int bx = get_group_id(0);
         
 	local elem* sh_w = shared;				
 	local elem* sh_v = sh_w + 2 * b_dim;				
@@ -346,7 +341,7 @@ kernel void spike_local_reduction_x1(global elem* x,
 	sh_x[tx] = x[base + tx];
 	sh_x[tx + b_dim] = x[base + tx + (stride - 1) * b_dim];
 	
-	barrer(CLK_LOCAL_MEM_FENCE);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	int scaler = 2;
 	
@@ -389,7 +384,7 @@ kernel void spike_local_reduction_x1(global elem* x,
 		}
 		scaler *= 2;
 
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 	
 	//write out
@@ -405,7 +400,7 @@ kernel void spike_local_reduction_x1(global elem* x,
 	//write mirror
 	if(tx < 1)
 	{
-		int g_dim = gridDim.x;
+		int g_dim = get_global_size(0);
 		w_mirror[bx] = sh_w[0];
 		w_mirror[g_dim + bx] = sh_w[2 * b_dim - 1];
 		
@@ -422,14 +417,14 @@ kernel void spike_local_reduction_x1(global elem* x,
 /// One block version
 ///
 ////////////////////
-kernel void spike_GPU_global_solving_x1(global elem* x,
+kernel void spike_global_solving_x1(global elem* x,
                                         global elem* w,
                                         global elem* v,
                                         local elem* shared,
                                         const int len)
 {
-	int ix = threadIdx.x;
-	int b_dim = blockDim.x;
+	int ix = get_local_id(0);
+	int b_dim = get_local_size(0);
 	
 	local elem* sh_w = shared;
 	local elem* sh_v = sh_w + 2 * len;
@@ -455,12 +450,12 @@ kernel void spike_GPU_global_solving_x1(global elem* x,
 		
 		ix += b_dim;
 	}
-	barrer(CLK_LOCAL_MEM_FENCE);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	int scaler = 2;
 	while (scaler <= len)
 	{
-		ix = threadIdx.x;
+		ix = get_local_id(0);
 		while (ix < len / scaler)
 		{
 			int index = scaler * ix + scaler / 2 - 1;;
@@ -498,14 +493,14 @@ kernel void spike_GPU_global_solving_x1(global elem* x,
 		}
 
 		scaler *= 2;
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 	
 	// backward reduction
 	scaler = len / 2;
 	while (scaler >= 2)
 	{
-		ix = threadIdx.x;
+		ix = get_local_id(0);
 		while(ix < len/scaler)
 		{
 			int index = scaler * ix + scaler / 2 - 1;
@@ -525,11 +520,11 @@ kernel void spike_GPU_global_solving_x1(global elem* x,
 		}
 
 		scaler /= 2;
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 	
 	// write out
-	ix = threadIdx.x;
+	ix = get_local_id(0);
 	while (ix < len)
 	{
 		x[ix] = sh_x[ix];
@@ -539,16 +534,16 @@ kernel void spike_GPU_global_solving_x1(global elem* x,
 }
 
 /// a thread-block level SPIKE solver 
-kernel void spike_GPU_local_solving_x1(global elem* x,
+kernel void spike_local_solving_x1(global elem* x,
                                        global const elem* w,
                                        global const elem* v,
                                        global const elem* x_mirror,
                                        local elem* shared,
                                        const int stride)
 {
-	int tx = threadIdx.x;
-	int b_dim = blockDim.x;
-	int bx = blockIdx.x;
+	int tx = get_local_id(0);
+	int b_dim = get_local_size(0);
+	int bx = get_group_id(0);
 	
 	local elem* sh_w = shared;				
 	local elem* sh_v = sh_w + 2 * b_dim;				
@@ -572,18 +567,18 @@ kernel void spike_GPU_local_solving_x1(global elem* x,
 	sh_x[tx + 1] = x[base + tx + (stride - 1) * b_dim];
 	sh_x[tx + b_dim + 1] = x[base + tx];
 	
-	barrer(CLK_LOCAL_MEM_FENCE);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	if (tx < 1)
 	{
-		int g_dim = gridDim.x;
+		int g_dim = get_global_size(0);
 		sh_x[0] = bx > 0? x_mirror[bx - 1 + g_dim] : clReal(0);
 		sh_x[2 * b_dim + 1] = bx < g_dim - 1 ? x_mirror[bx + 1] : clReal(0);
 		
 		sh_x[b_dim + 1] = x_mirror[bx];
 		sh_x[b_dim] = x_mirror[bx + g_dim];		
 	}
-	barrer(CLK_LOCAL_MEM_FENCE);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	int scaler = b_dim;
 	while (scaler >= 2)
@@ -602,7 +597,7 @@ kernel void spike_GPU_local_solving_x1(global elem* x,
 		}
 
 		scaler /= 2;
-		barrer(CLK_LOCAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 	
 	// write out
@@ -611,15 +606,15 @@ kernel void spike_GPU_local_solving_x1(global elem* x,
 }
 
 // backward substitution for SPIKE solver
-kernel void spike_GPU_back_sub_x1(global elem* x,
+kernel void spike_back_sub_x1(global elem* x,
                                   global const elem* w,
                                   global const elem* v,
                                   global const elem* x_mirror,
                                   const int stride)
 {
-	int tx = threadIdx.x;
-	int b_dim = blockDim.x;
-	int bx = blockIdx.x;
+	int tx = get_local_id(0);
+	int b_dim = get_local_size(0);
+	int bx = get_group_id(0);
 
 	int base = bx * stride * b_dim;
 	elem x_up, x_down;
@@ -631,7 +626,7 @@ kernel void spike_GPU_back_sub_x1(global elem* x,
 	}
 	else
 	{
-		int g_dim = gridDim.x;
+		int g_dim = get_global_size(0);
 		if (tx == 0)
 		{
 			x_up   = bx > 0 ? x_mirror[bx - 1 + g_dim] : clReal(0);
