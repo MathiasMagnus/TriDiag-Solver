@@ -16,7 +16,7 @@ kernel void foward_marshaling_bxb(global elem* x,
 	int shared_in = get_local_id(1)*(b_dim+1)+get_local_id(0);
 	int shared_out = get_local_id(0)*(b_dim+1)+get_local_id(1);
 
-	for (int k=0 ; k < h_stride ; k += b_dim)
+	for (int k = 0 ; k < h_stride ; k += b_dim)
 	{	
 		share[shared_in] = global_in >= m ? pad : y[global_in];
 		global_in += b_dim;

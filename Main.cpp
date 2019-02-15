@@ -70,28 +70,30 @@ int main(int argc, char** argv)
 
         if (!quiet_arg.getValue()) std::cout << "Selected device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
-        if (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_global_int32_base_atomics") == std::string::npos) throw std::runtime_error{ "Selected device does not support double precision" };
+        if (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_global_int32_base_atomics") == std::string::npos) throw std::runtime_error{ "Selected device does not support cl_khr_global_int32_base_atomics" };
 
         std::vector<cl_context_properties> props{ CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(platform()), 0 };
         cl::Context context{ device, props.data() };
 
-        cl::CommandQueue command_queue{ context, device, CL_QUEUE_PROFILING_ENABLE };
+        cl::CommandQueue queue{ context, device, CL_QUEUE_PROFILING_ENABLE };
 
-        tridiag_solver<real, solver_internal> solver{ command_queue };
+        tridiag_solver<real, solver_internal> solver{ queue };
 
         auto prng = [engine = std::default_random_engine{},
                      dist = std::uniform_real_distribution<real>{ -1, 1 }]() mutable { return dist(engine); };
-        std::vector<real> d, du, dl;
+        std::vector<real> d, du, dl, b(length_arg.getValue());
         std::generate_n(std::back_inserter(d),  length_arg.getValue(),     prng);
-        std::generate_n(std::back_inserter(du), length_arg.getValue() - 1, prng);
-        std::generate_n(std::back_inserter(dl), length_arg.getValue() - 1, prng);
+        std::generate_n(std::back_inserter(du), length_arg.getValue()/* - 1*/, prng);
+        std::generate_n(std::back_inserter(dl), length_arg.getValue()/* - 1*/, prng);
 
         cl::Buffer  d_buf(context, d.begin(),  d.end(),  false), // false = read_only
                    du_buf(context, du.begin(), du.end(), false), // false = read_only
                    dl_buf(context, dl.begin(), dl.end(), false), // false = read_only
                     b_buf(context, CL_MEM_READ_WRITE, length_arg.getValue() * sizeof(real));
 
-        solver.gtsv_spike_partial_diag_pivot(dl_buf, d_buf, du_buf, b_buf, length_arg.getValue());
+        solver.gtsv_spike_partial_diag_pivot(dl_buf, d_buf, du_buf, b_buf, length_arg.getValue()).wait();
+
+        cl::copy(queue, b_buf, b.begin(), b.end());
     }
     catch (TCLAP::ArgException& e)
     {

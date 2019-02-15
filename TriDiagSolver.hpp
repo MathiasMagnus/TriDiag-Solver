@@ -193,31 +193,7 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
     cl::EnqueueArgs fwd_enq_args{ queue_,
                                   wait,
                                   cl::NDRange{ b_dim, s * tile_marshal },      // g_data
-                                  cl::NDRange{ tile_marshal, tile_marshal } }, // b_data
-                    pivot_enq_args{ queue_,
-                                    forward_events,
-                                    cl::NDRange{ s * b_dim },
-                                    cl::NDRange{ b_dim } },
-                    spike_local_reduction_enq_args{ queue_,
-                                                    pivot_event,
-                                                    cl::NDRange{ s * b_dim },
-                                                    cl::NDRange{ b_dim } },
-                    spike_global_solving_enq_args{ queue_,
-                                                   local_reduction_event,
-                                                   cl::NDRange{ 1 * 32 },
-                                                   cl::NDRange{ 32 } },
-                    spike_local_solving_enq_args{ queue_,
-                                                  global_solving_event,
-                                                  cl::NDRange{ s * b_dim },
-                                                  cl::NDRange{ b_dim } },
-                    spike_back_sub_enq_args{ queue_,
-                                             local_solving_event,
-                                             cl::NDRange{ s * b_dim },
-                                             cl::NDRange{ b_dim } },
-                    back_marshal_enq_args{ queue_,
-                                           back_sub_event,
-                                           cl::NDRange{ b_dim, s * tile_marshal },      // g_data
-                                           cl::NDRange{ tile_marshal, tile_marshal } }; // b_data
+                                  cl::NDRange{ tile_marshal, tile_marshal } }; // b_data
     // data layout transformation
     forward_events = { foward_marshaling_bxb(fwd_enq_args, dl_buffer, dl, cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 0),
                        foward_marshaling_bxb(fwd_enq_args, d_buffer,  d,  cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 1),
@@ -225,7 +201,10 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                        foward_marshaling_bxb(fwd_enq_args, b_buffer,  b,  cl::Local(marshaling_share_size), (cl_int)stride, (cl_int)b_dim, (cl_int)m, 0) };
 
     // partitioned solver
-    pivot_event = { tiled_diag_pivot_x1(pivot_enq_args,
+    pivot_event = { tiled_diag_pivot_x1(cl::EnqueueArgs{ queue_,
+                                                         forward_events,
+                                                         cl::NDRange{ s * b_dim },
+                                                         cl::NDRange{ b_dim } },
                                         b_buffer,
                                         w_buffer,
                                         v_buffer,
@@ -238,7 +217,10 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                         (cl_int)tile) };
 
     // SPIKE solver
-    local_reduction_event = { spike_local_reduction_x1(spike_local_reduction_enq_args,
+    local_reduction_event = { spike_local_reduction_x1(cl::EnqueueArgs{ queue_,
+                                                                        pivot_event,
+                                                                        cl::NDRange{ s * b_dim },
+                                                                        cl::NDRange{ b_dim } },
                                                        b_buffer,
                                                        w_buffer,
                                                        v_buffer,
@@ -248,14 +230,20 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                                        cl::Local(local_reduction_share_size),
                                                        (cl_int)stride) };
 
-    global_solving_event = { spike_global_solving_x1(spike_global_solving_enq_args,
+    global_solving_event = { spike_global_solving_x1(cl::EnqueueArgs{ queue_,
+                                                                      local_reduction_event,
+                                                                      cl::NDRange{ 1 * 32 },
+                                                                      cl::NDRange{ 32 } },
                                                      x_level_2,
                                                      w_level_2,
                                                      v_level_2,
                                                      cl::Local(global_share_size),
                                                      (cl_int)s) };
 
-    local_solving_event = { spike_local_solving_x1(spike_local_reduction_enq_args,
+    local_solving_event = { spike_local_solving_x1(cl::EnqueueArgs{ queue_,
+                                                                    global_solving_event,
+                                                                    cl::NDRange{ s * b_dim },
+                                                                    cl::NDRange{ b_dim } },
                                                    b_buffer,
                                                    w_buffer,
                                                    v_buffer,
@@ -263,14 +251,20 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
                                                    cl::Local(local_solving_share_size),
                                                    (cl_int)stride) };
 
-    back_sub_event = { spike_back_sub_x1(spike_back_sub_enq_args,
+    back_sub_event = { spike_back_sub_x1(cl::EnqueueArgs{ queue_,
+                                                          local_solving_event,
+                                                          cl::NDRange{ s * b_dim },
+                                                          cl::NDRange{ b_dim } },
                                          b_buffer,
                                          w_buffer,
                                          v_buffer,
                                          x_level_2,
                                          (cl_int)stride) };
 
-    back_marshal_event = { back_marshaling_bxb(back_marshal_enq_args,
+    back_marshal_event = { back_marshaling_bxb(cl::EnqueueArgs{ queue_,
+                                                                back_sub_event,
+                                                                cl::NDRange{ b_dim, s * tile_marshal },
+                                                                cl::NDRange{ tile_marshal, tile_marshal } },
                                                b,
                                                b_buffer,
                                                cl::Local(marshaling_share_size),
