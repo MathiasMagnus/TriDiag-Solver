@@ -1,7 +1,9 @@
 #include <TriDiagSolver.hpp>
 
+#include <Options.hpp>
+
 // TCLAP includes
-#include <tclap/CmdLine.h>
+#include <tclap/CmdLine.h>  // TCLAP::ArgException
 
 // OpenCL includes
 #define CL_HPP_ENABLE_EXCEPTIONS
@@ -32,52 +34,27 @@ int main(int argc, char** argv)
 {
     try
     {
-        std::string banner = "OpenCL-TriDiagSolver sample";
+        const std::string banner = "TriDiagSolver-OpenCL sample";
 
-        TCLAP::CmdLine cli(banner);
+        const cli::options opts = cli::parse(argc, argv, banner);
 
-        TCLAP::ValueArg<std::string> input_arg("i", "input", "Path to input file", false, "./", "path");
-        TCLAP::ValueArg<std::string> output_arg("o", "output", "Path to output file", false, "", "path");
-        TCLAP::ValueArg<std::string> validate_arg("v", "validate", "Path to validation file", false, "", "path");
-        TCLAP::ValueArg<std::size_t> length_arg("l", "length", "Length of input", false, 262144, "positive integral");
-        TCLAP::ValueArg<std::size_t> platform_arg("p", "platform", "Index of platform to use", false, 0, "positive integral");
-        TCLAP::ValueArg<std::size_t> device_arg("d", "device", "Number of input points", false, 0, "positive integral");
-        TCLAP::ValueArg<std::string> type_arg("t", "type", "Type of device to use", false, "default", "[cpu|gpu|acc]");
-        TCLAP::SwitchArg quiet_arg("q", "quiet", "Suppress standard output", false);
-
-        cli.add(input_arg);
-        cli.add(output_arg);
-        cli.add(validate_arg);
-        cli.add(length_arg);
-        cli.add(platform_arg);
-        cli.add(device_arg);
-        cli.add(type_arg);
-        cli.add(quiet_arg);
-
-        cli.parse(argc, argv);
-
-        if (!quiet_arg.getValue()) std::cout << banner << std::endl << std::endl;
+        if (!opts.quiet) std::cout << banner << std::endl << std::endl;
 
         std::vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
 
         if (platforms.empty()) throw std::runtime_error{ "No OpenCL platform detected." };
 
-        cl::Platform platform = platforms.at(platform_arg.getValue());
+        cl::Platform platform = platforms.at(opts.plat_id);
 
-        if (!quiet_arg.getValue()) std::cout << "Selected platform: " << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
-
-        cl_device_type device_type = CL_DEVICE_TYPE_DEFAULT;
-        if (type_arg.getValue() == "cpu") device_type = CL_DEVICE_TYPE_CPU;
-        if (type_arg.getValue() == "gpu") device_type = CL_DEVICE_TYPE_GPU;
-        if (type_arg.getValue() == "acc") device_type = CL_DEVICE_TYPE_ACCELERATOR;
+        if (!opts.quiet) std::cout << "Selected platform: " << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
 
         std::vector<cl::Device> devices;
-        platform.getDevices(device_type, &devices);
+        platform.getDevices(opts.dev_type, &devices);
 
-        cl::Device device = devices.at(device_arg.getValue());
+        cl::Device device = devices.at(opts.dev_id);
 
-        if (!quiet_arg.getValue()) std::cout << "Selected device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
+        if (!opts.quiet) std::cout << "Selected device: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
         if (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_global_int32_base_atomics") == std::string::npos) throw std::runtime_error{ "Selected device does not support cl_khr_global_int32_base_atomics" };
 
@@ -91,10 +68,10 @@ int main(int argc, char** argv)
         auto prng = [engine = std::default_random_engine{},
                      dist = std::uniform_real_distribution<real>{ -1, 1 }]() mutable { return dist(engine); };
         std::array<std::vector<real>, 4> arrays;
-        for (auto& arr : arrays) std::generate_n(std::back_inserter(arr), length_arg.getValue(), prng);
+        for (auto& arr : arrays) std::generate_n(std::back_inserter(arr), opts.length, prng);
 
         arrays[dl].at(0) = 0;
-        arrays[du].at(length_arg.getValue() - 1) = 0;
+        arrays[du].at(opts.length - 1) = 0;
 
         std::array<cl::Buffer, 4> buffers;
         std::transform(arrays.begin(), arrays.end(),

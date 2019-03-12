@@ -2,9 +2,11 @@ cmake_minimum_required(VERSION 3.7) # OpenCL::OpenCL imported target syntax
 
 set(Target_Name TriDiagSolver-OpenCL)
 
-set(Hdrs TriDiagSolver.hpp)
+set(Hdrs TriDiagSolver.hpp
+         Options.hpp)
 
-set(Srcs Main.cpp)
+set(Srcs Main.cpp
+         Options.cpp)
 
 set(Krns TriDiagSolver.cl)
 
