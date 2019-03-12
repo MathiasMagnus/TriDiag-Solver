@@ -318,8 +318,11 @@ cl::Event tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot(cl::Buffer dl, cl
 template <typename T, typename TT>
 void tridiag_solver<T, TT>::findBestGrid(cl::size_type m, cl::size_type tile_marshal)
 {
-    cl::size_type B_DIM_MAX, S_MAX;
+    cl::size_type B_DIM_MAX = 1024 / sizeof(T),
+                  S_MAX = 2048 / sizeof(T);
 
+    // Original code with warning
+    /*
     if (sizeof(T) == 4) { // float
         B_DIM_MAX = 256;
         S_MAX = 512;
@@ -332,6 +335,7 @@ void tridiag_solver<T, TT>::findBestGrid(cl::size_type m, cl::size_type tile_mar
         B_DIM_MAX = 64;
         S_MAX = 128;
     }
+    */
 
     // b_dim must be multiple of 32
     if (m < B_DIM_MAX * tile_marshal) {
