@@ -14,10 +14,19 @@
 #include <cstddef>      // std::size_t
 #include <iostream>     // std::cout, std::cerr
 #include <stdexcept>    // std::runtime_error
-#include <random>       // std::default_random_engine, 
+#include <random>       // std::default_random_engine
+#include <utility>      // std::pair
+
 
 using real = float;
 using solver_internal = float;
+enum array
+{
+    d = 0,
+    du = 1,
+    dl = 2,
+    b = 3
+};
 
 int main(int argc, char** argv)
 {
@@ -81,19 +90,23 @@ int main(int argc, char** argv)
 
         auto prng = [engine = std::default_random_engine{},
                      dist = std::uniform_real_distribution<real>{ -1, 1 }]() mutable { return dist(engine); };
-        std::vector<real> d, du, dl, b(length_arg.getValue());
-        std::generate_n(std::back_inserter(d),  length_arg.getValue(),     prng);
-        std::generate_n(std::back_inserter(du), length_arg.getValue()/* - 1*/, prng);
-        std::generate_n(std::back_inserter(dl), length_arg.getValue()/* - 1*/, prng);
+        std::array<std::vector<real>, 4> arrays;
+        for (auto& arr : arrays) std::generate_n(std::back_inserter(arr), length_arg.getValue(), prng);
 
-        cl::Buffer  d_buf(context, d.begin(),  d.end(),  false), // false = read_only
-                   du_buf(context, du.begin(), du.end(), false), // false = read_only
-                   dl_buf(context, dl.begin(), dl.end(), false), // false = read_only
-                    b_buf(context, CL_MEM_READ_WRITE, length_arg.getValue() * sizeof(real));
+        arrays[dl].at(0) = 0;
+        arrays[du].at(length_arg.getValue() - 1) = 0;
 
-        solver.gtsv_spike_partial_diag_pivot(dl_buf, d_buf, du_buf, b_buf, length_arg.getValue()).wait();
+        std::array<cl::Buffer, 4> buffers;
+        std::transform(arrays.begin(), arrays.end(),
+                       buffers.begin(),
+                       [&](std::vector<real> & arr)
+        {
+                return cl::Buffer{ context, arr.begin(), arr.end(), false }; // false = read_only
+        });
 
-        cl::copy(queue, b_buf, b.begin(), b.end());
+        solver.gtsv_spike_partial_diag_pivot(buffers[dl], buffers[d], buffers[du], buffers[b]).wait();
+
+        cl::copy(queue, buffers[b], arrays[b].begin(), arrays[b].end());
     }
     catch (TCLAP::ArgException& e)
     {

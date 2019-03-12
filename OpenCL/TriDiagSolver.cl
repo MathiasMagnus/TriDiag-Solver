@@ -1,5 +1,7 @@
 #include <TriDiagSolverOps.cl>
 
+//#pragma OPENCL EXTENSION cl_amd_printf : enable
+
 // Data layout transformation for inputs
 kernel void foward_marshaling_bxb(global elem* x,
                                   global const elem* y,
@@ -75,7 +77,7 @@ kernel void tiled_diag_pivot_x1(global elem* x,
                                 global elem* w,          // left halo
                                 global elem* v,          // right halo
                                 global elem* b_buffer,   // modified main diag
-                                global bool* flag,       // buffer to tag pivot
+                                global uchar* flag,      // buffer to tag pivot
                                 global const elem* a,    // lower diag
                                 global const elem* b,    // main diag
                                 global const elem* c,    // upper diag
@@ -136,6 +138,8 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				w[ix] = w_k;		//k
 				b_buffer[ix] = b_k;
 
+				barrier(CLK_GLOBAL_MEM_FENCE);
+
 				if( k < stride-1)
 				{
 					ix += b_dim;
@@ -168,6 +172,7 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				else // k = stride -1
 				{
 					v[ix] = clMul(c[ix], b_inv);
+					barrier(CLK_GLOBAL_MEM_FENCE);
 					ix   += b_dim;
 				}
 				
@@ -181,6 +186,8 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				w[ix] = clMul(w_k, clMul(b_k_1, delta));
 				b_buffer[ix] = b_k;
 				flag[ix] = false;
+
+				barrier(CLK_GLOBAL_MEM_FENCE);
 				
                 x_k_1 = clFma(b_k, x_k_1, -clMul(a_k_1, x_k)); //k+1
                 x_k_1 = clMul(x_k_1, delta);
@@ -188,8 +195,10 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				
 				x[ix + b_dim]        = x_k_1;	  //k+1
 				w[ix + b_dim]        = w_k_1;	  //k+1
-				b_buffer[ix + b_dim] = b_k_1;				
-				flag[ix + b_dim] = false;	
+				b_buffer[ix + b_dim] = b_k_1;
+				flag[ix + b_dim] = false;
+
+				barrier(CLK_GLOBAL_MEM_FENCE);
 				
 				if (k < stride - 2)
 				{
@@ -198,7 +207,8 @@ kernel void tiled_diag_pivot_x1(global elem* x,
                     x_k = clFma(-a_k_2, x_k_1, x[ix]); // k+2
 					w_k = clMul(-a_k_2, w_k_1);        // k+2
                     b_k = clMul(clMul(a_k_2, b_k), clMul(c_k_1, delta)); // k+2
-                    b_k -= b[ix];
+                    //b_k -= b[ix]; // Wrong?
+					b_k = b[ix] - b_k;
 					
 					if(k < stride - 3)
 					{
@@ -227,6 +237,7 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 					v_temp = clMul(c[ix + b_dim], delta);					
                     v[ix]  = clMul(v_temp, -c_k);
 					v[ix + b_dim] = clMul(v_temp, b_k);
+					barrier(CLK_GLOBAL_MEM_FENCE);
 					ix += 2 * b_dim;
 				}				
 				k += 2;
@@ -273,6 +284,9 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				x[ix] = x_k_1;
 				w[ix] = w_k_1;
 				v[ix] = v_k_1;
+
+				barrier(CLK_GLOBAL_MEM_FENCE);
+
 				k -= 1;
 			}
 			else {
@@ -291,6 +305,8 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				x[ix] = clFma(-x_k_1, prod, x[ix]);
 				w[ix] = clFma(-w_k_1, prod, w[ix]);
 				v[ix] = clMul(-v_k_1, prod);
+
+				barrier(CLK_GLOBAL_MEM_FENCE);
 				
                 ix  -= b_dim;
                 prod = clMul(c_k_1, clMul(c_k, delta));
@@ -301,6 +317,9 @@ kernel void tiled_diag_pivot_x1(global elem* x,
 				x[ix] = x_k_1;
 				w[ix] = w_k_1;
 				v[ix] = v_k_1;
+
+				barrier(CLK_GLOBAL_MEM_FENCE);
+				
 				k -= 2;
 			}
 			ix -= b_dim;
@@ -342,6 +361,8 @@ kernel void spike_local_reduction_x1(global elem* x,
 	sh_x[tx + b_dim] = x[base + tx + (stride - 1) * b_dim];
 	
 	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if (tx == 0 && bx == 0) printf("sh_x[%d] = %f", tx, sh_x[tx]);
 	
 	int scaler = 2;
 	
@@ -382,6 +403,10 @@ kernel void spike_local_reduction_x1(global elem* x,
             sh_w[down_index + b_dim] = clMul(sh_w[index + b_dim], sh_w[down_index + b_dim]);
 			
 		}
+
+		barrier(CLK_LOCAL_MEM_FENCE); // remove with printf
+		if (scaler * tx == 0) printf("tx = %d\tindex = %d\tsh_x[index + 1] = %f\t-sh_v[up_index] = %f\tsh_x[up_index] = %f", tx, scaler * tx + scaler / 2 - 1, sh_x[scaler * tx + scaler / 2 - 1 + 1], -sh_v[scaler * tx], sh_x[scaler * tx]);
+
 		scaler *= 2;
 
 		barrier(CLK_LOCAL_MEM_FENCE);
@@ -393,6 +418,8 @@ kernel void spike_local_reduction_x1(global elem* x,
 	
 	v[base + tx] = sh_v[tx];
 	v[base + tx + (stride - 1) * b_dim] = sh_v[tx + b_dim];
+
+	if (tx == 0 && bx == 0) printf("base = %d\ttx = %d\tstride = %d\tb_dim = %d\tsh_x[tx] = %f", base, tx, stride, b_dim, sh_x[tx]);
 	
 	x[base + tx] = sh_x[tx];
 	x[base + tx + (stride - 1) * b_dim] = sh_x[tx + b_dim];
@@ -410,6 +437,9 @@ kernel void spike_local_reduction_x1(global elem* x,
 		x_mirror[bx] = sh_x[0];
 		x_mirror[g_dim + bx] = sh_x[2 * b_dim - 1];
 	}
+
+	barrier(CLK_LOCAL_MEM_FENCE); // remove with printf
+	if (tx == 0 && bx == 0) printf("sh_x[%d] = %f", tx, sh_x[tx]);
 }
 
 ///////////////////////////
