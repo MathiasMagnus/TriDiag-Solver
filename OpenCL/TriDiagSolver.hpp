@@ -81,9 +81,10 @@ tridiag_solver<T, TT>::tridiag_solver(cl::CommandQueue queue)
 
     std::stringstream build_opts;
     build_opts <<
-        "-cl-mad-enable " <<
-        "-cl-no-signed-zeros " <<
-        "-cl-finite-math-only " <<
+        //"-cl-mad-enable " <<
+        //"-cl-no-signed-zeros " <<
+        //"-cl-finite-math-only " <<
+        "-cl-opt-disable " << 
         "-cl-single-precision-constant " <<
         "-Delem=" << host_type_to_cl_name(T{}) << " " <<
         "-Dreal=" << host_type_to_cl_name(TT{}) << " " <<

@@ -365,30 +365,75 @@ kernel void spike_local_reduction_x1(global elem* x,
 	if (tx == 0 && bx == 0) printf("sh_x[%d] = %f", tx, sh_x[tx]);
 	
 	int scaler = 2;
+	{
+	    int index;
+        int up_index;
+        int down_index;
+		index = scaler * tx + scaler / 2 - 1;
+		up_index= scaler * tx;
+		down_index = scaler * tx + scaler - 1;
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_x[index + b_dim] = %f\tsh_x[index + 1] = %f\tsh_w[index + 1] = %f\tsh_w[index + b_dim] = %f", tx, sh_x[index + b_dim], sh_x[index + 1], sh_w[index + 1], sh_w[index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_v[index + b_dim] = %f\tsh_v[index + 1] = %f\tsh_x[up_index] = %f\tsh_x[down_index + b_dim] = %f", tx, sh_v[index + b_dim], sh_v[index + 1], sh_x[up_index], sh_x[down_index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_w[up_index] = %f\tsh_v[up_index] = %f\tsh_v[down_index + b_dim] = %f\tsh_w[down_index + b_dim] = %f", tx, sh_w[up_index], sh_v[up_index], sh_v[down_index + b_dim], sh_w[down_index + b_dim]);
+
+		if (tx < b_dim / scaler && ((index + b_dim >= 2 * b_dim) || (index + 1 >= 2 * b_dim) || (up_index >= 2 * b_dim) || (down_index + b_dim >= 2 * b_dim))) printf("%d will overindex in group %d", tx, bx);
+	}
+
+	if (tx == 0 && bx == 0) printf("0 * 0 = %f", clMul(0.0f, 0.0f));
 	
 	while (scaler <= b_dim)
 	{
+        int index;
+        int up_index;
+        int down_index;
+		elem det;
+
 		if (tx < b_dim / scaler)
-		{
-			int index;
-			int up_index;
-			int down_index;
+		{	
 			index = scaler * tx + scaler / 2 - 1;
 			up_index= scaler * tx;
 			down_index = scaler * tx + scaler - 1;
-			elem det = clReal(1);
+			det = clReal(1);
 			det = clFma(-sh_v[index + b_dim], sh_w[index + 1], det);
-			det = clDiv(clReal(1), det);
-			
+			if (tx == 49) det = 0;
+			else det = clDiv(clReal(1), det);
+			if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("det = %d", det);
+		}
+
+		barrier(CLK_LOCAL_MEM_FENCE);
+
+		elem temp1, temp2, temp3, temp4;
+
+		if (tx < b_dim / scaler)
+		{
 			elem d1,d2;
 			d1 = sh_x[index + b_dim];
 			d2 = sh_x[index + 1];
-			
-            sh_x[index + b_dim] = clMul(clFma(sh_v[index + b_dim], -d2, d1), det);
-            sh_x[index + 1]     = clMul(clFma(sh_w[index + 1], -d1, d2), det);			
-            sh_w[index + 1]     = clMul(sh_w[index + b_dim], clMul(sh_w[index + 1], -det));	            
-			sh_w[index + b_dim] = clMul(sh_w[index + b_dim], det);
-									
+
+			if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("d1 = %f\td2 = %f\tsh_v[index + b_dim] = %f", d1, d2, sh_v[index + b_dim]);
+			if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("index + b_dim = %d\tindex + 1 = %d\tup_index = %d\tdown_index + b_dim = %d", index + b_dim, index + 1, up_index, down_index + b_dim);
+
+            temp1 = clMul(clFma(sh_v[index + b_dim], -d2, d1), det);
+            temp2 = clMul(clFma(sh_w[index + 1], -d1, d2), det);			
+            temp3 = clMul(sh_w[index + b_dim], clMul(sh_w[index + 1], -det));	            
+			temp4 = clMul(sh_w[index + b_dim], det);
+
+			if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\ttemp1 = %f\ttemp2 = %f\ttemp3 = %f\ttemp4 = %f\tclFma(sh_v[index + b_dim], -d2, d1) = %f\tclMul(..., det) = %f", tx, temp1, temp2, temp3, temp4, clFma(sh_v[index + b_dim], -d2, d1), clMul(clFma(sh_v[index + b_dim], -d2, d1), det));
+		}
+		barrier(CLK_LOCAL_MEM_FENCE); // remove with printf
+		if (tx < b_dim / scaler)
+		{
+			sh_x[index + b_dim] = temp1;
+			sh_x[index + 1]     = temp2;
+			sh_w[index + 1]     = temp3;
+			sh_w[index + b_dim] = temp4;
+		}
+		barrier(CLK_LOCAL_MEM_FENCE); // remove with printf
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_x[index + b_dim] = %f\tsh_x[index + 1] = %f\tsh_w[index + 1] = %f\tsh_w[index + b_dim] = %f", tx, sh_x[index + b_dim], sh_x[index + 1], sh_w[index + 1], sh_w[index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_v[index + b_dim] = %f\tsh_v[index + 1] = %f\tsh_x[up_index] = %f\tsh_x[down_index + b_dim] = %f", tx, sh_v[index + b_dim], sh_v[index + 1], sh_x[up_index], sh_x[down_index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_w[up_index] = %f\tsh_v[up_index] = %f\tsh_v[down_index + b_dim] = %f\tsh_w[down_index + b_dim] = %f", tx, sh_w[up_index], sh_v[up_index], sh_v[down_index + b_dim], sh_w[down_index + b_dim]);
+		if (tx < b_dim / scaler)
+		{
 			sh_v[index + b_dim] = clMul(sh_v[index + b_dim], clMul(sh_v[index + 1], -det));            
 			sh_v[index + 1]     = clMul(sh_v[index + 1], det);
 			
@@ -405,7 +450,11 @@ kernel void spike_local_reduction_x1(global elem* x,
 		}
 
 		barrier(CLK_LOCAL_MEM_FENCE); // remove with printf
-		if (scaler * tx == 0) printf("tx = %d\tindex = %d\tsh_x[index + 1] = %f\t-sh_v[up_index] = %f\tsh_x[up_index] = %f", tx, scaler * tx + scaler / 2 - 1, sh_x[scaler * tx + scaler / 2 - 1 + 1], -sh_v[scaler * tx], sh_x[scaler * tx]);
+		//if (scaler * tx == 0 && (isnan(sh_x[scaler * tx + scaler / 2 - 1 + 1]) || isnan(sh_v[scaler * tx]))) printf("tx = %d\tindex = %d\tscaler = %d\tsh_x[index + 1] = %f\t-sh_v[up_index] = %f\tsh_x[up_index] = %f", tx, scaler * tx + scaler / 2 - 1, scaler, sh_x[scaler * tx + scaler / 2 - 1 + 1], -sh_v[scaler * tx], sh_x[scaler * tx]);
+
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_x[index + b_dim] = %f\tsh_x[index + 1] = %f\tsh_w[index + 1] = %f\tsh_w[index + b_dim] = %f", tx, sh_x[index + b_dim], sh_x[index + 1], sh_w[index + 1], sh_w[index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_v[index + b_dim] = %f\tsh_v[index + 1] = %f\tsh_x[up_index] = %f\tsh_x[down_index + b_dim] = %f", tx, sh_v[index + b_dim], sh_v[index + 1], sh_x[up_index], sh_x[down_index + b_dim]);
+		if (scaler == 2 && bx == 0 && (tx < b_dim / scaler) && tx == 49) printf("tx = %d\tsh_w[up_index] = %f\tsh_v[up_index] = %f\tsh_v[down_index + b_dim] = %f\tsh_w[down_index + b_dim] = %f", tx, sh_w[up_index], sh_v[up_index], sh_v[down_index + b_dim], sh_w[down_index + b_dim]);
 
 		scaler *= 2;
 
