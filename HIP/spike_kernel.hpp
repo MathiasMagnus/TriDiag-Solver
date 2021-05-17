@@ -406,7 +406,7 @@ __global__ void tiled_diag_pivot_x_few(
 	T_ELEM b_k,b_k_1,a_k_1,c_k;
 	T_ELEM x_k,x_k_1;
 	
-	T_ELEM_REAL kia = (sqrt(5.0)-1.0)/2.0;
+	//T_ELEM_REAL kia = (sqrt(5.0)-1.0)/2.0;
 	b_k = b[ix];
 	c_k = c[ix];
     x_k = x[rhs_ix];

@@ -35,6 +35,8 @@ OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
 //#include <sys/resource.h>
 //#include <sys/sysinfo.h>
 
+#include "tridiag_solver.hpp"
+
 #define DEBUG 0
 
 static double get_second (void)
@@ -185,7 +187,6 @@ void test_gtsv_v1(int m)
 	T *du;
 	T *b;
 
-	
 	//allocation
 	{
 		h_dl=(T *)malloc(sizeof(T)*m);
@@ -237,8 +238,9 @@ void test_gtsv_v1(int m)
 	cudaMemcpy(b, h_b, m*sizeof(T), cudaMemcpyHostToDevice);
 
 	//this is for general matrix
+	tridiag_solver<T,T_REAL> tds{m};
     start = get_second();
-    gtsv_spike_partial_diag_pivot<T,T_REAL>( dl, d, du, b,m,1);
+	tds.solve(dl, d, du, b);
     cudaDeviceSynchronize();
 	stop = get_second();
     printf("test_gtsv_v1 m=%d time=%.6f\n", m, stop-start);    
@@ -349,8 +351,9 @@ void test_gtsv_v_few(int m,int rhs)
 	cudaMemcpy(b, h_b, m*sizeof(T)*rhs, cudaMemcpyHostToDevice);
 
 	//this is for general matrix
+	tridiag_solver<T,T_REAL> tds{m,rhs};
     start = get_second();
-    gtsv_spike_partial_diag_pivot<T,T_REAL>( dl, d, du, b,m,rhs);
+    tds.solve(dl, d, du, b);
     cudaDeviceSynchronize();
 	stop = get_second();
     printf("test_gtsv_v1 m=%d time=%.6f\n", m, stop-start);    
@@ -482,23 +485,6 @@ int main(int argc, char *argv[])
 	printf("double test_gtsv multiple rhs testing\n");
 	test_gtsv_v_few<double,double>(m,k);
     printf("END double test_gtsv multiple rhs testing\n");
-	
-	/*
-    printf("Double complex test_gtsv 5 rhs testing\n");    
-	test_gtsv_v_few<cuDoubleComplex,double>(m,5);    
-    printf("END Double complex test_gtsv 5 rhs\n");
-    
-	
-	
-	printf("double test_dtsvb_v1 testing\n");
-	test_dtsvb_v1<double,double>(m);
-	
-	printf("double complex test_dtsvb_v1 testing\n");
-	test_dtsvb_v1<cuDoubleComplex,double>(m);
-	
-	*/	
-	//printf("float testing\n");
-	//test_dtsvb_v1<float>(m);
   
 	return 0;
 
