@@ -74,7 +74,7 @@ private:
 	void gtsv_spike_partial_diag_pivot_few(const T* dl, const T* d, const T* du, T* b);
 
 	template <typename U, typename UU>
-	auto max(U&& lhs, UU&& rhs){ return lhs > rhs ? lhs : rhs; };
+	static auto max(U&& lhs, UU&& rhs){ return lhs > rhs ? lhs : rhs; };
 };
 
 template <typename T, typename TT>
