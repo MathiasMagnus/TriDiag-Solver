@@ -26,7 +26,3 @@ if(TRIDIAG_OPENCL)
   find_package(OpenCL REQUIRED)
   add_subdirectory(OpenCL)
 endif(TRIDIAG_OPENCL)
-
-if(TRIDIAG_CUDA AND TRIDIAG_OPENCL)
-  add_subdirectory(validate)
-endif(TRIDIAG_CUDA AND TRIDIAG_OPENCL)
