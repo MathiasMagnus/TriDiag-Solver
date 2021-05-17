@@ -172,48 +172,36 @@ void tridiag_solver<T, TT>::solve(const T* dl, const T* d, const T* du, T* b)
 template <typename T, typename TT>
 void tridiag_solver<T, TT>::find_best_grid()
 {
-    int B_DIM_MAX, S_MAX;
+	static constexpr int B_DIM_MAX = 1024 / sizeof(T);
+	static constexpr int S_MAX = 2048 / sizeof(T);
 
-    if ( sizeof(T) == 4) {
-        B_DIM_MAX = 256;
-        S_MAX     = 512;    
-    }
-    else if (sizeof(T) == 8){ /* double and complex */
-        B_DIM_MAX = 128;
-        S_MAX     = 256;     
-    }
-    else { /* doubleComplex */
-        B_DIM_MAX = 64;
-        S_MAX      = 128;    
-    }
+	/* b_dim must be multiple of 32 */
+	if ( m < B_DIM_MAX * tile_marshal ) {
+		b_dim = max( 32, (m/(32*tile_marshal))*32);
+		s = 1;
+		m_pad = ((m + b_dim * tile_marshal -1)/(b_dim * tile_marshal)) * (b_dim * tile_marshal);
+		stride = m_pad/(s*b_dim);    
+	}
+	else {
+		b_dim = B_DIM_MAX;
 
-    /* b_dim must be multiple of 32 */
-    if ( m < B_DIM_MAX * tile_marshal ) {
-        b_dim = max( 32, (m/(32*tile_marshal))*32);
-        s = 1;
-        m_pad = ((m + b_dim * tile_marshal -1)/(b_dim * tile_marshal)) * (b_dim * tile_marshal);
-        stride = m_pad/(s*b_dim);    
-    }
-    else {
-        b_dim = B_DIM_MAX;
-        
-        s = 1;
-        do {
-            int s_tmp = s * 2;
-            int m_pad_tmp = ((m + s_tmp*b_dim*tile_marshal -1)/(s_tmp*b_dim*tile_marshal)) * (s_tmp*b_dim*tile_marshal);
-            float diff = (float)(m_pad_tmp - m)/float(m);
-            /* We do not want to have more than 20% oversize */
-            if ( diff < .2 ) {
-                s = s_tmp;
-            }
-            else {
-                break;
-            }
-        } while (s < S_MAX);
-                       
-        m_pad = ((m + s*b_dim*tile_marshal -1)/(s*b_dim*tile_marshal)) * (s*b_dim*tile_marshal);
-        stride = m_pad/(s*b_dim);
-    }
+		s = 1;
+		do {
+			int s_tmp = s * 2;
+			int m_pad_tmp = ((m + s_tmp*b_dim*tile_marshal -1)/(s_tmp*b_dim*tile_marshal)) * (s_tmp*b_dim*tile_marshal);
+			float diff = (float)(m_pad_tmp - m)/float(m);
+			/* We do not want to have more than 20% oversize */
+			if ( diff < .2 ) {
+				s = s_tmp;
+			}
+			else {
+				break;
+			}
+		} while (s < S_MAX);
+
+		m_pad = ((m + s*b_dim*tile_marshal -1)/(s*b_dim*tile_marshal)) * (s*b_dim*tile_marshal);
+		stride = m_pad/(s*b_dim);
+	}
 }
 
 template <typename T, typename TT>
