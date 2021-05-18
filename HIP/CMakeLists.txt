@@ -1,31 +1,93 @@
 cmake_minimum_required(VERSION 3.8) # cxx_std_17
 
-set(Target_Name TriDiagSolver-HIP)
+add_library(tridiag_hip_common INTERFACE)
 
-set(Hdrs
-  tridiag_solver.hpp
-  spike_kernel.hpp
-  cusparse_ops.hpp
+target_link_libraries(tridiag_hip_common
+  INTERFACE
+    $<$<BOOL:${USE_HIP_CPU}>:hip_cpu_rt::hip_cpu_rt>
+    $<$<NOT:$<BOOL:${USE_HIP_CPU}>>:hip::device>
+)
+target_compile_options(tridiag_hip_common
+  INTERFACE
+    $<$<AND:$<BOOL:${USE_HIP_CPU}>,$<CXX_COMPILER_ID:MSVC>>:/bigobj>
 )
 
-set(Srcs main.cpp)
-
-add_executable(${Target_Name} ${Hdrs} ${Srcs})
-
-if(USE_HIP_CPU)
-  target_link_libraries(${Target_Name}
-    PRIVATE
-      hip_cpu_rt::hip_cpu_rt
+if(BUILD_EXAMPLE)
+  set(Headers
+    tridiag_solver.hpp
+    spike_kernel.hpp
+    cusparse_ops.hpp
   )
-  target_compile_options(${Target_Name}
-    PRIVATE
-      $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+  set(Sources
+    tridiag_example_hip.cpp
   )
-else()
-  target_link_libraries(${Target_Name}
-    hip::device
+  set(Kernels
+    spike_kernel.hpp
+  )
+  add_executable(tridiag_example_hip
+    ${Headers}
+    ${Sources}
+    ${Kernels}
+  )
+  target_link_libraries(tridiag_example_hip
+    INTERFACE
+      tridiag_hip_common
+  )
+  source_group ("Headers" FILES ${Headers})
+  source_group ("Sources" FILES ${Sources})
+  source_group ("Kernels" FILES ${Kernels})
+endif()
+
+if(BUILD_TESTING)
+  set(Headers
+    tridiag_solver.hpp
+    spike_kernel.hpp
+    cusparse_ops.hpp
+  )
+  set(Sources
+    tridiag_test_hip.cpp
+  )
+  set(Kernels
+    spike_kernel.hpp
+  )
+  add_executable(tridiag_test_hip
+    ${Headers}
+    ${Sources}
+    ${Kernels}
+  )
+  target_link_libraries(tridiag_test_hip
+    PRIVATE
+      tridiag_hip_common
+      GTest::gtest
+      GTest::gtest_main
+  )
+  add_test(
+    NAME solve
+    COMMAND tridiag_test_hip
   )
 endif()
 
-source_group ("Headers" FILES ${Hdrs})
-source_group ("Sources" FILES ${Srcs})
+if(BUILD_BENCHMARK)
+  set(Headers
+    tridiag_solver.hpp
+    spike_kernel.hpp
+    cusparse_ops.hpp
+  )
+  set(Sources
+    tridiag_benchmark_hip.cpp
+  )
+  set(Kernels
+    spike_kernel.hpp
+  )
+  add_executable(tridiag_benchmark_hip
+    ${Headers}
+    ${Sources}
+    ${Kernels}
+  )
+  target_link_libraries(tridiag_benchmark_hip
+    INTERFACE
+      tridiag_hip_common
+    PRIVATE
+      benchmark::benchmark
+  )
+endif()

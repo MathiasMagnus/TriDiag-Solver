@@ -25,7 +25,14 @@
 #endif
 
 #include "hip_definitions.hpp"
+#include <hip/hip_runtime.h>
 #include <hip/hip_complex.h>
+
+#if defined(__HIP_CPU_RT__)
+#  define __inline__ inline
+#else
+#  define __inline__
+#endif
 
 inline
 double hipCabs(hipDoubleComplex x) noexcept
@@ -98,12 +105,6 @@ hipComplex hipCfmaf(hipComplex x, hipComplex y, hipComplex d) noexcept
 {
     return (x * y) + d;
 }
-
-#if defined(__HIP_CPU_RT__)
-#  define __inline__ inline
-#else
-#  define __inline__
-#endif
 
 /* Multiplication */
 static __inline__ __device__ __host__   float cuMul( float x , float y )

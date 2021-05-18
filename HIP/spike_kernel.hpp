@@ -149,7 +149,7 @@ __global__ void tiled_diag_pivot_x1(
 	T_ELEM w_k,w_k_1;
 	T_ELEM v_k_1;
 	
-	T_ELEM_REAL kia = (sqrt(5.0)-1.0)/2.0;
+	T_ELEM_REAL kia = (sqrt((T_ELEM_REAL)5)-(T_ELEM_REAL)1)/(T_ELEM_REAL)2;
 	b_k = b[ix];
 	c_k = c[ix];
 	//x_k = d[ix];
@@ -180,7 +180,7 @@ __global__ void tiled_diag_pivot_x1(
 			sgema = max( sgema, cuAbs(a_k_2));			
 			
 			if( cuMul(cuAbs(b_k),sgema) >= cuMul( kia, cuMul(cuAbs(c_k), cuAbs(a_k_1)) ))
-			{    
+			{
                 T_ELEM b_inv = cuDiv( cuGet<T_ELEM>(1), b_k);
 				//write back
 				flag[ix]=true;
