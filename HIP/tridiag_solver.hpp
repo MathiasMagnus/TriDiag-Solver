@@ -29,10 +29,13 @@ OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
 
 #include "spike_kernel.hpp"
 
-template <typename T, typename TT>
+template <typename T>
 class tridiag_solver
 {
 public:
+
+	using value_type = T;
+	using real_type = decltype(cuAbs(cuGet<T>(0)));
 
 	tridiag_solver(int m, int k = 1);
 	~tridiag_solver();
@@ -77,8 +80,8 @@ private:
 	static auto max(U&& lhs, UU&& rhs){ return lhs > rhs ? lhs : rhs; };
 };
 
-template <typename T, typename TT>
-tridiag_solver<T, TT>::tridiag_solver(int m_in, int k_in)
+template <typename T>
+tridiag_solver<T>::tridiag_solver(int m_in, int k_in)
 	: m{m_in}, k{k_in}
 {
 	find_best_grid();
@@ -122,20 +125,20 @@ tridiag_solver<T, TT>::tridiag_solver(int m_in, int k_in)
 		cudaMalloc((void **)&v_level_2, T_size*s*2);
 	}
 
-	cudaFuncSetCacheConfig((tiled_diag_pivot_x1<T,TT>),cudaFuncCachePreferL1);
+	cudaFuncSetCacheConfig((tiled_diag_pivot_x1<value_type,real_type>),cudaFuncCachePreferL1);
 	if(k != 1)
 	{
-		cudaFuncSetCacheConfig((tiled_diag_pivot_x_few<T,TT>),cudaFuncCachePreferL1);
-		cudaFuncSetCacheConfig(spike_GPU_back_sub_x_few<T>,cudaFuncCachePreferL1);
+		cudaFuncSetCacheConfig((tiled_diag_pivot_x_few<value_type,real_type>),cudaFuncCachePreferL1);
+		cudaFuncSetCacheConfig(spike_GPU_back_sub_x_few<value_type>,cudaFuncCachePreferL1);
 	}
 	else
 	{
-		cudaFuncSetCacheConfig(spike_GPU_back_sub_x1<T>,cudaFuncCachePreferL1);
+		cudaFuncSetCacheConfig(spike_GPU_back_sub_x1<value_type>,cudaFuncCachePreferL1);
 	}
 }
 
-template <typename T, typename TT>
-tridiag_solver<T, TT>::~tridiag_solver()
+template <typename T>
+tridiag_solver<T>::~tridiag_solver()
 {
 	cudaFree(flag);
 	cudaFree(dl_buffer);
@@ -161,16 +164,16 @@ tridiag_solver<T, TT>::~tridiag_solver()
 	}
 }
 
-template <typename T, typename TT> 
-void tridiag_solver<T, TT>::solve(const T* dl, const T* d, const T* du, T* b)
+template <typename T> 
+void tridiag_solver<T>::solve(const T* dl, const T* d, const T* du, T* b)
 {
 	if(k<=0) return;
 	if(k==1) gtsv_spike_partial_diag_pivot_v1(dl, d, du, b);
 	else     gtsv_spike_partial_diag_pivot_few(dl, d, du, b);
 }
 
-template <typename T, typename TT>
-void tridiag_solver<T, TT>::find_best_grid()
+template <typename T>
+void tridiag_solver<T>::find_best_grid()
 {
 	static constexpr int B_DIM_MAX = 1024 / sizeof(T);
 	static constexpr int S_MAX = 2048 / sizeof(T);
@@ -204,57 +207,57 @@ void tridiag_solver<T, TT>::find_best_grid()
 	}
 }
 
-template <typename T, typename TT>
-void tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot_v1(const T* dl, const T* d, const T* du, T* b)
+template <typename T>
+void tridiag_solver<T>::gtsv_spike_partial_diag_pivot_v1(const T* dl, const T* d, const T* du, T* b)
 {
 	// data layout transformation
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>), g_data ,b_data, marshaling_share_size, 0, dl_buffer, dl, stride, b_dim,m, cuGet<T>(0));
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>), g_data ,b_data, marshaling_share_size, 0, d_buffer,  d,  stride, b_dim,m, cuGet<T>(1));
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>), g_data ,b_data, marshaling_share_size, 0, du_buffer, du, stride, b_dim,m, cuGet<T>(0));
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>), g_data ,b_data, marshaling_share_size, 0, b_buffer,  b,  stride, b_dim,m, cuGet<T>(0));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>), g_data ,b_data, marshaling_share_size, 0, dl_buffer, dl, stride, b_dim,m, cuGet<value_type>(0));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>), g_data ,b_data, marshaling_share_size, 0, d_buffer,  d,  stride, b_dim,m, cuGet<value_type>(1));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>), g_data ,b_data, marshaling_share_size, 0, du_buffer, du, stride, b_dim,m, cuGet<value_type>(0));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>), g_data ,b_data, marshaling_share_size, 0, b_buffer,  b,  stride, b_dim,m, cuGet<value_type>(0));
 
 	// partitioned solver
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x1<T,TT>), s, b_dim, 0, 0, b_buffer, w_buffer, v_buffer, c2_buffer, flag, dl_buffer, d_buffer, du_buffer, stride, tile);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x1<value_type,real_type>), s, b_dim, 0, 0, b_buffer, w_buffer, v_buffer, c2_buffer, flag, dl_buffer, d_buffer, du_buffer, stride, tile);
 
 	// SPIKE solver
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_local_reduction_x1<T>), s, b_dim,local_reduction_share_size, 0, b_buffer,w_buffer,v_buffer,x_level_2, w_level_2, v_level_2,stride);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_global_solving_x1),1,32,global_share_size,0, x_level_2,w_level_2,v_level_2,s);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_local_solving_x1<T>),s,b_dim,local_solving_share_size,0,b_buffer,w_buffer,v_buffer,x_level_2,stride);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_back_sub_x1<T>),s,b_dim,0,0,b_buffer,w_buffer,v_buffer, x_level_2,stride);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_local_reduction_x1<value_type>), s, b_dim,local_reduction_share_size, 0, b_buffer,w_buffer,v_buffer,x_level_2, w_level_2, v_level_2,stride);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_global_solving_x1<value_type>),1,32,global_share_size,0, x_level_2,w_level_2,v_level_2,s);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_local_solving_x1<value_type>),s,b_dim,local_solving_share_size,0,b_buffer,w_buffer,v_buffer,x_level_2,stride);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_back_sub_x1<value_type>),s,b_dim,0,0,b_buffer,w_buffer,v_buffer, x_level_2,stride);
 
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(back_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,b,b_buffer,stride,b_dim,m);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(back_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,b,b_buffer,stride,b_dim,m);
 }
 
-template <typename T, typename TT>
-void tridiag_solver<T, TT>::gtsv_spike_partial_diag_pivot_few(const T* dl, const T* d, const T* du, T* b)
+template <typename T>
+void tridiag_solver<T>::gtsv_spike_partial_diag_pivot_few(const T* dl, const T* d, const T* du, T* b)
 {
 	// data layout transformation
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,dl_buffer, dl, stride, b_dim,m, cuGet<T>(0));
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,d_buffer,  d,  stride, b_dim,m, cuGet<T>(1));
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,du_buffer, du, stride, b_dim,m, cuGet<T>(0));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,dl_buffer, dl, stride, b_dim,m, cuGet<value_type>(0));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,d_buffer,  d,  stride, b_dim,m, cuGet<value_type>(1));
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,du_buffer, du, stride, b_dim,m, cuGet<value_type>(0));
 
 	// TODO: it will be replaced by a kernel
 	for(int i=0;i<k;i++)
 	{
-		hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,b_buffer+i*m_pad,  b+i*m,  stride, b_dim,m, cuGet<T>(0));
+		hipLaunchKernelGGL(HIP_KERNEL_NAME(foward_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,b_buffer+i*m_pad,  b+i*m,  stride, b_dim,m, cuGet<value_type>(0));
 	}
 
 	// partitioned solver
 
 	// solve w, v and the fist x
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x1<T,TT>),s,b_dim,0,0,b_buffer, w_buffer, v_buffer, c2_buffer, flag, dl_buffer, d_buffer, du_buffer, stride, tile);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x1<value_type,real_type>),s,b_dim,0,0,b_buffer, w_buffer, v_buffer, c2_buffer, flag, dl_buffer, d_buffer, du_buffer, stride, tile);
 	// solve the rest x
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x_few<T,TT>),g_dp,b_dim,0,0,b_buffer+m_pad,flag,dl_buffer,c2_buffer,du_buffer,stride,tile,m_pad);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(tiled_diag_pivot_x_few<value_type,real_type>),g_dp,b_dim,0,0,b_buffer+m_pad,flag,dl_buffer,c2_buffer,du_buffer,stride,tile,m_pad);
 
 	// SPIKE solver
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_local_reduction_x_few<T>),g_spike,b_dim,local_reduction_share_size,0,b_buffer,w_buffer,v_buffer,w_mirror,v_mirror,x_mirror2,w_mirror2,v_mirror2,stride,m_pad);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_global_solving_x_few<T>),k,32,global_share_size,0,x_mirror2,w_mirror2,v_mirror2,s);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_local_solving_x_few<T>),g_spike,b_dim,local_solving_share_size,0,b_buffer,w_mirror,v_mirror,x_mirror2,stride,m_pad);
-	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_back_sub_x_few<T>),g_spike,b_dim,0,0,b_buffer,w_buffer,v_buffer,x_mirror2,stride,m_pad);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_local_reduction_x_few<value_type>),g_spike,b_dim,local_reduction_share_size,0,b_buffer,w_buffer,v_buffer,w_mirror,v_mirror,x_mirror2,w_mirror2,v_mirror2,stride,m_pad);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_global_solving_x_few<value_type>),k,32,global_share_size,0,x_mirror2,w_mirror2,v_mirror2,s);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_local_solving_x_few<value_type>),g_spike,b_dim,local_solving_share_size,0,b_buffer,w_mirror,v_mirror,x_mirror2,stride,m_pad);
+	hipLaunchKernelGGL(HIP_KERNEL_NAME(spike_GPU_back_sub_x_few<value_type>),g_spike,b_dim,0,0,b_buffer,w_buffer,v_buffer,x_mirror2,stride,m_pad);
 
 	// TODO: it will be replaced by a kernel
 	for(int i=0;i<k;i++)
 	{
-		hipLaunchKernelGGL(HIP_KERNEL_NAME(back_marshaling_bxb<T>),g_data ,b_data, marshaling_share_size,0,b+i*m,b_buffer+i*m_pad,stride,b_dim,m);
+		hipLaunchKernelGGL(HIP_KERNEL_NAME(back_marshaling_bxb<value_type>),g_data ,b_data, marshaling_share_size,0,b+i*m,b_buffer+i*m_pad,stride,b_dim,m);
 	}
 }
