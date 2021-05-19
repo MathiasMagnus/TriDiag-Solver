@@ -14,8 +14,6 @@
 using engine_type = std::ranlux48_base;
 using seed_type = engine_type::result_type;
 
-#include <hip/hip_runtime.h>
-
 #define HIP_CHECK(condition)         \
 {                                    \
     hipError_t _error = condition;    \
@@ -45,7 +43,6 @@ namespace test
         );
         return data;
     }
-
 
     template<class T, class U, class V>
     inline auto get_random_data(size_t size, U min, V max, seed_type seed_value)
@@ -105,7 +102,7 @@ namespace test
     auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const U percent)
         -> typename std::enable_if<std::is_same<T, cuDoubleComplex>::value || std::is_same<T, cuComplex>::value>::type
     {
-        //ASSERT_EQ(result.size(), expected.size());
+        ASSERT_EQ(result.size(), expected.size());
         for(size_t i = 0; i < result.size(); i++)
         {
             auto diff = std::max<U>(cuAbs(cuMul(cuGet<T>(percent), expected[i])), percent);

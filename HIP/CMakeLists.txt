@@ -62,7 +62,7 @@ if(BUILD_TESTING)
       GTest::gtest_main
   )
   add_test(
-    NAME solve
+    NAME solve_hip
     COMMAND tridiag_test_hip
   )
 endif()
@@ -85,9 +85,8 @@ if(BUILD_BENCHMARK)
     ${Kernels}
   )
   target_link_libraries(tridiag_benchmark_hip
-    INTERFACE
-      tridiag_hip_common
     PRIVATE
+      tridiag_hip_common
       benchmark::benchmark
   )
 endif()
